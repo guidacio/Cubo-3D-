@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubo científico: Degradación de los ecosistemas</title>
+<style>
+  :root {
+    --bg: #070b14;
+    --line: #1f3a5f;
+    --accent: #3ee0ff;
+    --accent2: #7cffb2;
+    --warn: #ffb86b;
+    --text: #d8e6ff;
+    --muted: #8aa0c2;
+    /* La perspectiva agranda la cara frontal ~20 %, por eso se achica un poco el cubo */
+    --size: min(80vw, calc((100vh - 250px) / 1.2), 560px);
+  }
+  @supports (height: 100dvh) {
+    :root { --size: min(80vw, calc((100dvh - 250px) / 1.2), 560px); }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 30%, #10203c 0%, var(--bg) 70%);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(62,224,255,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(62,224,255,.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  header { text-align: center; padding: 14px 16px 0; z-index: 2; }
+  header h1 { font-size: clamp(15px, 3.4vw, 21px); letter-spacing: .18em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  header p { font-size: 12px; color: var(--muted); margin-top: 4px; letter-spacing: .06em; }
+
+  .stage {
+    flex: 1; width: 100%; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    perspective: calc(var(--size) * 3.2);
+    touch-action: none; cursor: grab;
+  }
+  .stage.dragging { cursor: grabbing; }
+
+  .cube {
+    position: relative;
+    width: var(--size); height: var(--size);
+    transform-style: preserve-3d;
+    transition: transform 1.1s cubic-bezier(.65, .05, .25, 1);
+    will-change: transform;
+  }
+  .cube.no-anim { transition: none; }
+
+  .face {
+    position: absolute; inset: 0;
+    background: linear-gradient(160deg, rgba(16,28,52,.98), rgba(8,14,28,.98));
+    border: 1.5px solid var(--accent);
+    box-shadow: inset 0 0 40px rgba(62,224,255,.12), 0 0 22px rgba(62,224,255,.18);
+    padding: calc(var(--size) * .055);
+    display: flex; flex-direction: column; gap: calc(var(--size) * .022);
+    backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    /* sin overflow:hidden: en un contexto 3D rompe la deteccion de clics, toques y rueda sobre la cara */
+  }
+  .face::before, .face::after {
+    content: ""; position: absolute; width: 16px; height: 16px; border: 2px solid var(--accent2);
+  }
+  .face::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
+  .face::after { bottom: 6px; right: 6px; border-left: none; border-top: none; }
+
+  /* Cada cara está definida de modo que, al traerla al frente con una rotación
+     simple, su contenido queda siempre derecho. */
+  .f-front  { transform: translateZ(calc(var(--size) / 2)); }
+  .f-right  { transform: rotateY(90deg)  translateZ(calc(var(--size) / 2)); }
+  .f-back   { transform: rotateY(180deg) translateZ(calc(var(--size) / 2)); }
+  .f-left   { transform: rotateY(-90deg) translateZ(calc(var(--size) / 2)); }
+  .f-top    { transform: rotateX(90deg)  translateZ(calc(var(--size) / 2)); }
+  .f-bottom { transform: rotateX(-90deg) translateZ(calc(var(--size) / 2)); }
+
+  .tag { font-size: calc(var(--size) * .027); letter-spacing: .2em; color: var(--accent2); text-transform: uppercase; }
+  .face h2 { font-size: calc(var(--size) * .057); color: #fff; font-weight: 600; line-height: 1.15; }
+  .face.cover h2 { font-size: calc(var(--size) * .068); }
+
+  .imgbox {
+    flex: 1; min-height: 0; border: 1px solid var(--line); background: #060b16;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .imgbox img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+  .caption { font-size: calc(var(--size) * .03); line-height: 1.35; color: var(--muted); }
+  .caption strong { color: var(--accent2); font-weight: 600; }
+
+  /* Cuerpo de texto: el tamaño de letra lo ajusta el script para que entre */
+  .wrap { position: relative; flex: 1; min-height: 0; }
+  .body { position: absolute; inset: 0; overflow: hidden; line-height: 1.38; color: var(--text); padding-right: 10px; }
+  .body .src { font-size: .78em; color: var(--muted); margin-top: .7em; }
+  .more {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 16%; pointer-events: none;
+    background: linear-gradient(transparent, rgba(8,14,28,.97) 75%);
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px;
+    color: var(--accent2); font-size: calc(var(--size) * .03); opacity: 0; transition: opacity .25s;
+  }
+  .wrap.more-on .more { opacity: 1; }
+  .prog { position: absolute; top: 0; bottom: 0; right: 0; width: 3px; border-radius: 2px;
+    background: rgba(62,224,255,.16); opacity: 0; pointer-events: none; }
+  .prog i { position: absolute; left: 0; right: 0; border-radius: 2px; background: var(--accent); }
+  .wrap.scrollable .prog { opacity: 1; }
+  .body p { margin-bottom: .45em; }
+  .body h3 { font-size: 1em; color: var(--accent); text-transform: uppercase; letter-spacing: .12em; margin: .5em 0 .15em; }
+  .body h3:first-child { margin-top: 0; }
+  .body ul { padding-left: 1.2em; margin-bottom: .35em; }
+  .body li { margin-bottom: .18em; }
+  .body li::marker { color: var(--accent2); }
+  .body strong { color: var(--accent); font-weight: 600; }
+  .body a { color: var(--accent2); font-weight: 600; text-decoration: underline; cursor: pointer; }
+  .key {
+    border-left: 3px solid var(--accent2); background: rgba(124,255,178,.08);
+    padding: .45em .7em; margin-top: .4em;
+  }
+  .key strong { color: var(--accent2); }
+
+  footer {
+    z-index: 2; padding: 6px 16px 18px;
+    display: flex; flex-direction: column; align-items: center; gap: 11px;
+  }
+  .controls { display: flex; gap: 10px; align-items: center; }
+  button {
+    background: transparent; color: var(--accent); border: 1.5px solid var(--accent);
+    padding: 11px 22px; font-size: 14px; letter-spacing: .12em; text-transform: uppercase;
+    cursor: pointer; transition: background .2s, color .2s; font-family: inherit;
+  }
+  button:hover, button:focus-visible { background: var(--accent); color: var(--bg); outline: none; }
+  button.ghost { border-color: var(--line); color: var(--muted); padding: 11px 14px; }
+  .dots { display: flex; gap: 9px; }
+  .dot { width: 12px; height: 12px; border: 1.5px solid var(--accent); border-radius: 50%; background: transparent; cursor: pointer; padding: 0; }
+  .dot:hover { background: rgba(62,224,255,.4); }
+  .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .hint { font-size: 11px; color: var(--muted); letter-spacing: .07em; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Cubo científico</h1>
+  <p id="status"></p>
+</header>
+
+<div class="stage" id="stage">
+  <div class="cube" id="cube"></div>
+</div>
+
+<footer>
+  <div class="controls">
+    <button class="ghost" id="prev" aria-label="Cara anterior">◀</button>
+    <button id="next">Siguiente cara ▶</button>
+  </div>
+  <div class="dots" id="dots"></div>
+  <div class="hint">Arrastrá para girar libremente · Si el texto continúa, deslizalo dentro de la cara · El botón lleva el cubo a la siguiente cara, siempre derecha</div>
+</footer>
+
+<script>
+/* ================================================================
+   CONTENIDO DE LAS CARAS  ← acá se edita todo
+   ================================================================ */
+const FACES = [
+  {
+    pos: "front", cover: true,
+    label: "Centro · Imagen de Corrientes",
+    tag: "Centro del cubo",
+    title: "Degradación de los ecosistemas",
+    image: "corrientes.jpg",
+    imageAlt: "Cuatro fotografías de un mismo tipo de ambiente en Corrientes: terreno quemado y vegetación recuperada, vistos a nivel del suelo y desde el aire",
+    caption: "<strong>Fotografías tomadas en Corrientes.</strong> A la izquierda, terreno afectado por un incendio; a la derecha, ambiente con vegetación recuperada."
+  },
+  {
+    pos: "right",
+    label: "Cara 1 de 5",
+    tag: "Cara 1",
+    title: "¿Qué es y por qué ocurre?",
+    html: `
+      <p>La degradación de los ecosistemas es el deterioro de un ambiente natural que reduce su biodiversidad y altera su funcionamiento.</p>
+      <p>Desde la ecología, implica la pérdida de la estructura (composición y abundancia de especies), de los procesos (producción primaria, ciclado de nutrientes, regulación hidrológica) y de la resiliencia, es decir, la capacidad del sistema de absorber perturbaciones y recuperarse. Cuando la presión supera ciertos umbrales, el ecosistema puede pasar a un estado alternativo, menos diverso y menos productivo, del que es difícil o muy lento volver.</p>
+      <p>Según la evaluación global del IPBES (2019), alrededor de tres cuartas partes del ambiente terrestre y cerca del 66 % del ambiente marino fueron alterados de forma significativa por la actividad humana, y alrededor de un millón de especies están en riesgo de extinción.</p>
+      <h3>Principales causas</h3>
+      <ul>
+        <li>Deforestación para agricultura y ganadería. Los cambios en el uso de la tierra y del mar son la principal causa directa de pérdida de naturaleza (IPBES, 2019). La expansión agrícola explica cerca del 90 % de la deforestación mundial: más de la mitad corresponde a la conversión a cultivos y casi el 40 % al pastoreo (FAO, 2021).</li>
+        <li>Incendios provocados o mal controlados. El fuego elimina la cobertura vegetal y la materia orgánica superficial; su frecuencia e intensidad aumentan con la acumulación de biomasa seca, las altas temperaturas, la baja humedad y el uso del fuego para el manejo de pasturas.</li>
+        <li>Contaminación del agua, el aire y el suelo. El aporte excesivo de nutrientes (nitrógeno y fósforo) provoca eutrofización de los cuerpos de agua, y los agroquímicos, los efluentes y los residuos alteran la calidad del suelo y la salud de los organismos (FAO, 2015).</li>
+        <li>Urbanización y explotación excesiva de recursos. La urbanización genera sellado del suelo (impermeabilización con asfalto y hormigón) y fragmentación del hábitat; la explotación directa de organismos (pesca, caza, tala) es la segunda causa directa de pérdida de naturaleza (IPBES, 2019).</li>
+        <li>Cambio climático. Altera los regímenes de temperatura y precipitación y favorece sequías, olas de calor y condiciones propicias para incendios; es la tercera causa directa de pérdida de naturaleza (IPBES, 2019).</li>
+      </ul>
+      <p>Estas causas rara vez actúan de forma aislada: se combinan y se refuerzan entre sí. Por ejemplo, el desmonte facilita la propagación del fuego y los incendios dejan el suelo expuesto a la erosión.</p>
+      <p class="src">Fuentes: IPBES (2019); FAO (2015, 2021).</p>`
+  },
+  {
+    pos: "back",
+    label: "Cara 2 de 5",
+    tag: "Cara 2",
+    title: "¿Cómo afecta a los sistemas naturales?",
+    html: `
+      <ul>
+        <li><strong>Flora:</strong> desaparecen plantas y árboles nativos. La pérdida de especies reduce la diversidad funcional, simplifica la estructura de la vegetación y favorece la colonización por especies exóticas invasoras, que se establecen con facilidad en sitios perturbados y desplazan a las nativas (quinta causa directa según IPBES, 2019).</li>
+        <li><strong>Fauna:</strong> los animales pierden alimento y refugio. La fragmentación del hábitat aísla las poblaciones, reduce su tamaño y su variabilidad genética y aumenta el efecto de borde; además se alteran las redes tróficas y procesos como la polinización y la dispersión de semillas. Entre las especies que dependen de humedales, una cuarta parte está amenazada y el 81 % de las poblaciones de humedales continentales disminuyó desde 1970 (Ramsar, 2018).</li>
+        <li><strong>Suelo:</strong> pierde nutrientes y aumenta la erosión. La pérdida de cobertura vegetal expone el suelo al impacto de la lluvia y del viento, disminuye el carbono orgánico y la actividad microbiana y deteriora su estructura. Según la FAO (2015), cerca del 33 % de los suelos del mundo está moderada o altamente degradado y la erosión arrastra entre 25 000 y 40 000 millones de toneladas de suelo superficial por año. La degradación de la tierra redujo la productividad del 23 % de la superficie terrestre (IPBES, 2019).</li>
+        <li><strong>Agua:</strong> se altera su calidad y disponibilidad. La menor infiltración y la mayor escorrentía aumentan el aporte de sedimentos y nutrientes a los cuerpos de agua (turbidez y eutrofización). Los humedales, que reciben, almacenan y liberan agua, perdieron cerca del 35 % de su extensión mundial entre 1970 y 2015, a un ritmo tres veces superior al de los bosques (Ramsar, 2018).</li>
+        <li><strong>Clima:</strong> disminuye la captura de dióxido de carbono y puede aumentar el calentamiento global. Al degradarse, un ecosistema deja de actuar como sumidero y puede convertirse en fuente de emisiones por la combustión y la descomposición de la biomasa y de la materia orgánica del suelo. Las turberas ocupan solo el 3 % de la superficie terrestre pero almacenan cerca del 30 % del carbono del suelo, y los alrededor de 50 millones de hectáreas drenados generan cerca del 4 % de las emisiones antropogénicas de gases de efecto invernadero (Ramsar, 2021).</li>
+      </ul>
+      <p>Estos cambios afectan las relaciones entre los seres vivos y el ambiente.</p>
+      <p>Además, operan mediante retroalimentaciones: la pérdida de vegetación reduce la evapotranspiración y la protección del suelo, y la desaparición de especies clave puede desencadenar efectos en cascada sobre toda la red trófica, lo que dificulta la recuperación del sistema.</p>
+      <p class="src">Fuentes: IPBES (2019); FAO (2015); Ramsar (2018, 2021).</p>`
+  },
+  {
+    pos: "left",
+    label: "Cara 3 de 5",
+    tag: "Cara 3",
+    title: "Consecuencias y caso real argentino",
+    html: `
+      <p><strong>Caso: incendios en los humedales del Paraná.</strong> El 16 de septiembre de 2026, el diario LA NACION informó sobre nuevos focos de incendio en las islas frente a Rosario, en territorio entrerriano. Se detectaron columnas de humo y varios puntos de calor en el humedal. Entre las causas señaladas estaban la vegetación seca, la falta de lluvias y las quemas de pastizales para renovar pasturas ganaderas.</p>
+      <p>La nota, firmada por Germán de los Santos (corresponsal en Rosario), se titula «El humo volvió al Paraná: focos de incendio en las islas reavivan el fantasma de la crisis ambiental en los humedales». Ubica los focos a la altura de los kilómetros 445 y 447 del río, alejados de la costa y en plena zona de humedal; en el sector Los Meones, vecinos hablaron de entre ocho y nueve focos. Prefectura Naval detectó al menos dos columnas de humo durante un patrullaje y las imágenes satelitales de la NASA confirmaron varios puntos de calor dispersos en el área insular. La nota no informa la superficie quemada.</p>
+      <p>El humo fue visible desde Rosario, San Lorenzo y Fray Luis Beltrán, y redujo la visibilidad en la ruta nacional 174 (km 22) y en la conexión vial con Victoria. Según la información oficial, no hubo personas, viviendas ni embarcaciones afectadas. El Guardacostas 141 no halló personas ni embarcaciones vinculadas a los focos y labró un acta; se dio aviso a la Policía de Islas, a Defensa Civil de Entre Ríos y al Plan Nacional de Manejo del Fuego, y se elevó un informe a la Fiscalía Federal de turno.</p>
+      <p>Como condiciones asociadas, la nota menciona baja humedad, falta de lluvias y temperaturas en ascenso, con vientos predominantes del este, noreste y norte previstos para toda la semana y sin lluvias importantes hasta el domingo. Recuerda además los antecedentes de 2020-2022, cuando los humedales ardieron de forma sistemática durante meses: cientos de miles de hectáreas afectadas en el delta, humo sobre Rosario y otras ciudades ribereñas, suspensión de actividades, consultas por problemas respiratorios y cortes en puentes y rutas, en un contexto de bajante histórica del río, quemas para ganadería y desmonte. Señala también el reclamo de una ley de humedales (un proyecto con más de diez años en el Congreso que perdió estado parlamentario en varias ocasiones), la lentitud de las causas judiciales por las quemas, con pocas condenas, y la responsabilidad repartida entre Nación, Entre Ríos y Santa Fe.</p>
+      <h3>Consecuencias posibles</h3>
+      <ul>
+        <li>Muerte de animales y destrucción de vegetación. Mortalidad directa, en especial de fauna de baja movilidad, nidos y crías, y pérdida de la cobertura herbácea y arbórea que sostiene la red trófica.</li>
+        <li>Pérdida de hábitats y biodiversidad. El cambio en la estructura del hábitat modifica la composición de especies y puede favorecer a las oportunistas e invasoras; la recuperación depende de la intensidad del fuego, de su recurrencia y del régimen hidrológico.</li>
+        <li>Contaminación del aire por el humo. El humo contiene material particulado fino (PM2.5), monóxido de carbono y otros compuestos que afectan el sistema respiratorio; la nota recuerda que en 2020-2022 hubo consultas por problemas respiratorios en las ciudades ribereñas.</li>
+        <li>Daños al suelo y alteración del humedal. Se reducen la cobertura y la materia orgánica superficial, se expone el suelo a la erosión y se afectan funciones del humedal como la regulación de crecidas, el filtrado del agua y el almacenamiento de carbono (Ramsar, 2018).</li>
+      </ul>
+      <p class="src">Datos del caso: LA NACION (16/09/2026). Consecuencias: Ramsar (2018).</p>`
+  },
+  {
+    pos: "top",
+    label: "Cara 4 de 5",
+    tag: "Cara 4",
+    title: "¿Qué podemos hacer?",
+    html: `
+      <h3>Prevenir</h3>
+      <ul>
+        <li>Evitar quemas ilegales y denunciar focos de incendio. Muchos incendios en humedales tienen origen humano; en el caso de la nota se señalan las quemas de pastizales para renovar pasturas. Las quemas controladas requieren autorización y planificación técnica, y el monitoreo con imágenes satelitales de puntos de calor, como las que confirmaron los focos del caso, permite detectar y avisar a tiempo a los organismos competentes.</li>
+        <li>Proteger bosques, humedales y áreas naturales. Como el cambio en el uso de la tierra es la principal causa directa de pérdida de naturaleza (IPBES, 2019), el ordenamiento territorial, las áreas protegidas y una ley de humedales que ordene los usos y fije sanciones claras (reclamada en la nota) son herramientas de prevención.</li>
+        <li>Reducir la contaminación y el consumo innecesario. Reducir y usar con mayor eficiencia los fertilizantes nitrogenados y fosfatados limita la eutrofización (FAO, 2015); consumir menos disminuye la presión sobre los ecosistemas de los que se extraen los recursos.</li>
+      </ul>
+      <h3>Reducir el daño</h3>
+      <ul>
+        <li>Controlar las actividades productivas. Prácticas de manejo sostenible como reducir o eliminar la labranza, mantener los residuos de cultivo sobre el suelo y rotar cultivos con leguminosas fijadoras de nitrógeno (FAO, 2015); en ganadería, planificar el uso de las pasturas y ajustar la carga animal sin recurrir a quemas.</li>
+        <li>Mejorar la gestión de residuos y el uso del agua. Tratar los efluentes, evitar el vertido de residuos y usar el agua con eficiencia protege la calidad y la disponibilidad hídrica de los ecosistemas acuáticos.</li>
+        <li>Aplicar las leyes ambientales. La normativa solo es eficaz con fiscalización y sanciones: la nota señala que las causas por las quemas de 2020-2022 avanzaron lentamente, con pocas condenas, y que la responsabilidad repartida entre Nación, Entre Ríos y Santa Fe dificulta la prevención y la persecución penal.</li>
+      </ul>
+      <h3>Restaurar</h3>
+      <ul>
+        <li>Recuperar ambientes degradados con especies nativas. Las especies nativas están adaptadas a las condiciones locales y sostienen las interacciones ecológicas originales. La restauración puede ser pasiva (eliminar la presión y permitir la regeneración natural) o activa (siembra, plantación, control de invasoras). No siempre es posible ni deseable devolver un ecosistema a su estado original: el objetivo puede ser recuperar sus funciones y servicios (FAO).</li>
+        <li>Proteger la fauna y sus hábitats. Mantener la conectividad del paisaje mediante corredores biológicos permite el movimiento y la recolonización de especies desde áreas no afectadas.</li>
+        <li>Monitorear los ecosistemas para evaluar su recuperación. Se miden indicadores como la cobertura vegetal, la riqueza y abundancia de especies, la calidad del agua y el carbono orgánico del suelo, y se comparan con sitios de referencia; la teledetección permite seguir los cambios a gran escala.</li>
+      </ul>
+      <p>La Década de las Naciones Unidas para la Restauración de los Ecosistemas (2021-2030) busca prevenir, detener y revertir la degradación de los ecosistemas en todo el mundo.</p>
+      <p class="src">Fuentes: FAO (2015); IPBES (2019); ONU, Decenio para la Restauración de los Ecosistemas; LA NACION (16/09/2026).</p>`
+  },
+  {
+    pos: "bottom",
+    label: "Cara 5 de 5",
+    tag: "Cara 5",
+    title: "¿Por qué es importante conservarlos?",
+    html: `
+      <p>Los ecosistemas sanos nos brindan servicios esenciales:</p>
+      <p>En la clasificación de la Evaluación de los Ecosistemas del Milenio (2005), estos servicios se agrupan en cuatro categorías: de aprovisionamiento, de regulación, de soporte y culturales.</p>
+      <ul>
+        <li>Producen oxígeno y capturan carbono. Mediante la fotosíntesis, la vegetación y el fitoplancton producen oxígeno y fijan CO₂ en la biomasa y en el suelo. Los sedimentos de los humedales costeros acumulan carbono hasta 55 veces más rápido que las selvas tropicales (Ramsar, 2021).</li>
+        <li>Regulan el ciclo del agua. Los humedales reciben, almacenan y liberan agua, amortiguan las crecidas y retienen sedimentos, nutrientes y contaminantes, lo que mejora la calidad del agua.</li>
+        <li>Mantienen la fertilidad del suelo. La descomposición de la materia orgánica y la actividad de los organismos del suelo reciclan nutrientes y sostienen su estructura; la degradación de la tierra ya redujo la productividad de cerca del 23 % de la superficie terrestre (IPBES, 2019).</li>
+        <li>Proporcionan alimentos y refugio a numerosas especies. Además de sostener la biodiversidad, brindan alimentos como peces y arroz y procesos como la polinización: hasta 577 000 millones de dólares anuales de cultivos están en riesgo por la pérdida de polinizadores (IPBES, 2019).</li>
+        <li>Contribuyen al bienestar y a la salud humana. Entre 100 y 300 millones de personas tienen mayor riesgo de inundaciones y huracanes por la pérdida de hábitats costeros (IPBES, 2019); además, la calidad del aire y del agua y el acceso a espacios naturales inciden en la salud física y mental.</li>
+      </ul>
+      <div class="key"><strong>Idea clave:</strong> proteger la naturaleza también significa proteger nuestra propia calidad de vida.</div>
+      <p>Las tendencias negativas de la biodiversidad podrían socavar el avance hacia el 80 % (35 de 44) de las metas analizadas de los Objetivos de Desarrollo Sostenible (IPBES, 2019).</p>
+      <p class="src">Fuentes: IPBES (2019); Ramsar (2018, 2021); Evaluación de los Ecosistemas del Milenio (2005).</p>`
+  },
+];
+
+/* Ángulos (rotateX, rotateY) que dejan cada cara de frente y derecha */
+const ANGLES = {
+  front:  [0, 0],
+  right:  [0, -90],
+  back:   [0, -180],
+  left:   [0, -270],
+  top:    [-90, 0],
+  bottom: [90, 0],
+};
+
+const cube = document.getElementById("cube");
+const stage = document.getElementById("stage");
+const statusEl = document.getElementById("status");
+const dotsEl = document.getElementById("dots");
+const bodies = [];
+
+/* ---------- Construcción del cubo ---------- */
+FACES.forEach((f, i) => {
+  const el = document.createElement("div");
+  el.className = "face f-" + f.pos + (f.cover ? " cover" : "");
+
+  const tag = document.createElement("div");
+  tag.className = "tag"; tag.textContent = f.tag;
+
+  const h = document.createElement("h2");
+  h.textContent = f.title;
+  el.append(tag, h);
+
+  if (f.image) {
+    const box = document.createElement("div");
+    box.className = "imgbox";
+    const img = document.createElement("img");
+    img.src = f.image; img.alt = f.imageAlt || f.title; img.draggable = false;
+    img.onerror = () => { box.innerHTML = '<div class="caption">[ no se encontró ' + f.image + ' ]</div>'; };
+    box.appendChild(img);
+    const cap = document.createElement("div");
+    cap.className = "caption"; cap.innerHTML = f.caption;
+    el.append(box, cap);
+  }
+  if (f.html) {
+    const wrap = document.createElement("div");
+    wrap.className = "wrap";
+    const b = document.createElement("div");
+    b.className = "body"; b.innerHTML = f.html;
+    const more = document.createElement("div");
+    more.className = "more"; more.textContent = "▼";
+    const prog = document.createElement("div");
+    prog.className = "prog"; prog.innerHTML = "<i></i>";
+    wrap.append(b, more, prog);
+    el.appendChild(wrap);
+    b.addEventListener("scroll", () => updateMore(b));
+    bodies.push(b);
+  }
+  cube.appendChild(el);
+
+  const d = document.createElement("button");
+  d.className = "dot"; d.setAttribute("aria-label", "Ir a: " + f.label);
+  d.title = f.label;
+  d.onclick = () => goTo(i);
+  dotsEl.appendChild(d);
+});
+
+/* ---------- Ajuste automático del tamaño de letra ---------- */
+function updateMore(b) {
+  const wrap = b.parentElement;
+  const scrollable = b.scrollHeight > b.clientHeight + 1;
+  const atEnd = b.scrollTop + b.clientHeight >= b.scrollHeight - 2;
+  wrap.classList.toggle("scrollable", scrollable);
+  wrap.classList.toggle("more-on", scrollable && !atEnd);
+  const thumb = wrap.querySelector(".prog i");
+  if (scrollable) {
+    thumb.style.height = (100 * b.clientHeight / b.scrollHeight) + "%";
+    thumb.style.top = (100 * b.scrollTop / b.scrollHeight) + "%";
+  }
+}
+function fitText() {
+  const size = cube.offsetWidth;
+  const floor = Math.max(13.5, size * 0.036);   // tamaño mínimo legible
+  bodies.forEach(b => {
+    let fs = size * 0.05;
+    b.style.fontSize = fs + "px";
+    while (b.scrollHeight > b.clientHeight + 1 && fs > floor) {
+      fs = Math.max(floor, fs - 0.5);
+      b.style.fontSize = fs + "px";
+    }
+    /* Si aun así no entra, el texto se desplaza dentro de la cara */
+    b.classList.toggle("scrollable", b.scrollHeight > b.clientHeight + 1);
+    updateMore(b);
+  });
+}
+
+/* ---------- Rotación ---------- */
+let rx = -18, ry = -28;   // arranca inclinado y luego se acomoda en la portada
+let index = 0;
+let dragging = false, lastX = 0, lastY = 0;
+
+function apply() {
+  cube.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+}
+function updateUI() {
+  statusEl.textContent = FACES[index].label;
+  [...dotsEl.children].forEach((d, i) => d.classList.toggle("active", i === index));
+}
+/* Equivalente de "target" (mod 360) más cercano al ángulo actual → giro corto */
+const near = (cur, target) => target + 360 * Math.round((cur - target) / 360);
+
+function goTo(i) {
+  index = (i + FACES.length) % FACES.length;
+  const [tx, ty] = ANGLES[FACES[index].pos];
+  rx = near(rx, tx);
+  ry = near(ry, ty);
+  cube.classList.remove("no-anim");
+  const bd = cube.children[index].querySelector(".body");
+  if (bd) { bd.scrollTop = 0; updateMore(bd); }
+  apply();
+  updateUI();
+}
+
+document.getElementById("next").onclick = () => goTo(index + 1);
+document.getElementById("prev").onclick = () => goTo(index - 1);
+window.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); goTo(index + 1); }
+  if (e.key === "ArrowLeft") goTo(index - 1);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const bd = cube.children[index].querySelector(".body");
+    if (bd) { e.preventDefault(); bd.scrollBy({ top: e.key === "ArrowDown" ? 90 : -90, behavior: "smooth" }); }
+  }
+});
+
+/* ---------- Arrastrar con mouse o dedo ---------- */
+/* El texto largo se desplaza con codigo propio (rueda, dedo y flechas): el
+   desplazamiento nativo dentro de un cubo 3D no es confiable en todos los navegadores. */
+const currentBody = () => cube.children[index].querySelector(".body");
+const scaleOf = bd => bd.getBoundingClientRect().height / bd.offsetHeight || 1;   // la perspectiva agranda la cara
+let mode = null, startX = 0, startY = 0, textBody = null, vy = 0, lastT = 0, raf = 0;
+
+stage.addEventListener("pointerdown", e => {
+  if (e.target.closest("a")) return;          // dejar que el enlace funcione
+  cancelAnimationFrame(raf);
+  dragging = true; lastX = startX = e.clientX; lastY = startY = e.clientY;
+  textBody = e.pointerType !== "mouse" ? e.target.closest(".body.scrollable") : null;
+  if (e.target.closest(".body.scrollable") === null) textBody = null;
+  mode = textBody ? "pending" : "rotate";
+  if (mode === "rotate") { stage.classList.add("dragging"); cube.classList.add("no-anim"); }
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  if (mode === "pending") {                   // con el dedo sobre el texto: vertical = leer, horizontal = girar
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+    if (Math.abs(dy) >= Math.abs(dx)) { mode = "text"; vy = 0; }
+    else { mode = "rotate"; stage.classList.add("dragging"); cube.classList.add("no-anim"); }
+    lastX = e.clientX; lastY = e.clientY; lastT = performance.now();
+    return;
+  }
+  if (mode === "text") {
+    const now = performance.now(), dy = e.clientY - lastY, k = scaleOf(textBody);
+    textBody.scrollTop -= dy / k;
+    vy = 0.8 * vy + 0.2 * (dy / k) / Math.max(1, now - lastT);
+    lastY = e.clientY; lastT = now;
+    return;
+  }
+  ry += (e.clientX - lastX) * 0.4;
+  rx -= (e.clientY - lastY) * 0.4;
+  lastX = e.clientX; lastY = e.clientY;
+  apply();
+});
+const stop = () => {
+  if (mode === "text" && textBody) {          // inercia al soltar
+    const bd = textBody;
+    const glide = () => {
+      if (Math.abs(vy) < 0.02) return;
+      bd.scrollTop -= vy * 16; vy *= 0.94;
+      raf = requestAnimationFrame(glide);
+    };
+    if (performance.now() - lastT < 80) glide();
+  }
+  dragging = false; mode = null; stage.classList.remove("dragging");
+};
+stage.addEventListener("pointerup", stop);
+stage.addEventListener("pointercancel", stop);
+
+stage.addEventListener("wheel", e => {
+  const bd = currentBody();
+  if (!bd || !bd.classList.contains("scrollable")) return;
+  e.preventDefault();
+  const k = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? bd.clientHeight : 1;
+  bd.scrollTop += e.deltaY * k;
+}, { passive: false });
+
+window.addEventListener("resize", fitText);
+window.addEventListener("load", fitText);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitText);
+
+apply();
+updateUI();
+fitText();
+setTimeout(() => goTo(0), 700);   // entrada: se acomoda sobre la imagen central
+</script>
+</body>
+</html>
